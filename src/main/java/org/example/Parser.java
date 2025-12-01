@@ -9,13 +9,26 @@ import java.util.Map;
  * Parser class implements recursive descent parser for a simple language
  * supports conditionals, variable declarations, statements, loops, & arithmetic operations
  *
- * Parser uses a Scanner to tokenize input and a symbol table to store
- * variables & types
+ * Parser uses a Scanner for lexical analysis and constructs an
+ * AbsSynTree representing the Abstract Syntax Tree (AST) for the input program
+ * It also maintains a symbol table for tracking declared variables and their types
  *
  * @author Avnoor Kaur
  */
 
 public class Parser {
+
+    /** AST constructed during parsing. */
+    private AbsSynTree ast = new AbsSynTree();
+
+    /**
+     * @return AST after parsing
+     *
+     */
+    public AbsSynTree getAst() {
+        return ast;
+    }
+
 
     /**
      * Enum representing data types
@@ -98,120 +111,131 @@ public class Parser {
 
 
     /**
-     * <Program> ::= <Vars> <Stmts> $
+     * @return program node representing AST root
      *
      * @throws Exception if parsing fails
      */
-    private void program() throws Exception {
-        vars();
-        stmts();
+    private AbsSynTree.NodeProgram program() throws Exception {
+        AbsSynTree.NodeVars nodeVars = vars();
+        AbsSynTree.NodeStmts nodeStmts = stmts();
+        AbsSynTree.NodeProgram programNode = ast.new NodeProgram(nodeVars, nodeStmts);
+        ast.setNodeProgram(programNode);
+        return programNode;
     }
 
     /**
-     * <Vars> ::= <Var> <Vars> | ""
+     * @return a node representing all declared variables
      *
      * @throws Exception if parsing fails
      */
-    private void vars() throws Exception {
+    private AbsSynTree.NodeVars vars() throws Exception {
+        AbsSynTree.NodeVars nodeVars = ast.new NodeVars();
         while (nextToken == Scanner.TOKEN.VAR) {
-            varDecl();
+            nodeVars.add(varDecl());
         }
+        return nodeVars;
     }
 
     /**
-     * <Var> ::= var id
      *
-     *  Ensures declared variable isn't already in the symbol table
+     * @return variable identifier node
      *
      * @throws Exception if declaration is invalid or variable is redeclared
      */
-    private void varDecl() throws Exception {
+    private AbsSynTree.NodeId varDecl() throws Exception {
         match(Scanner.TOKEN.VAR);
-        if (nextToken != Scanner.TOKEN.ID) {
-            throw new Exception("Parse Error\nExpected: ID\nReceived: " +
-                    nextToken + "\nBuffer: " + scanner.getTokenBufferString());
-        }
         String varName = scanner.getTokenBufferString();
-        if (symbolTable.containsKey(varName)) {
-            throw new Exception("Parse Error: Variable already declared: " + varName);
-        }
+        if (symbolTable.containsKey(varName)) throw new Exception("Variable already declared: " + varName);
         symbolTable.put(varName, new SymbolTableItem(varName, TYPE.INTDATATYPE));
         match(Scanner.TOKEN.ID);
+        return ast.new NodeId(varName);
     }
 
     /**
-     * <Stmts> ::= <Stmt> <Stmts> | ""
+     * @return node containing all parsed statements
      *
      * @throws Exception if parsing fails
      */
-    private void stmts() throws Exception {
+    private AbsSynTree.NodeStmts stmts() throws Exception {
+        AbsSynTree.NodeStmts nodeStmts = ast.new NodeStmts();
         while (nextToken == Scanner.TOKEN.WRITE || nextToken == Scanner.TOKEN.INIT ||
                 nextToken == Scanner.TOKEN.IF || nextToken == Scanner.TOKEN.WHILE ||
                 nextToken == Scanner.TOKEN.CALCULATE) {
-            stmt();
+            nodeStmts.add(stmt());
         }
+        return nodeStmts;
     }
 
     /**
-     * <Stmt> ::= ...
      *
-     * Handles different types of statements
-     * WRITE, INIT, IF, WHILE, & CALCULATE
+     * Parses a single statement and constructs corresponding AST node
      *
+     * @return AbsSynTree.NodeStmt representing parsed statement
      *
      * @throws Exception if unexpected token encountered
      */
-    private void stmt() throws Exception {
+    private AbsSynTree.NodeStmt stmt() throws Exception {
         switch (nextToken) {
             case WRITE:
                 match(Scanner.TOKEN.WRITE);
+                String writeVar = scanner.getTokenBufferString();
                 match(Scanner.TOKEN.ID);
-                break;
+                return ast.new NodeWrite(ast.new NodeId(writeVar));
             case INIT:
                 match(Scanner.TOKEN.INIT);
                 String initVar = scanner.getTokenBufferString();
                 match(Scanner.TOKEN.ID);
                 match(Scanner.TOKEN.EQUALS);
+                int value = Integer.parseInt(scanner.getTokenBufferString());
                 match(Scanner.TOKEN.INTLITERAL);
-                break;
-            case IF:
-                match(Scanner.TOKEN.IF);
-                match(Scanner.TOKEN.ID);
-                match(Scanner.TOKEN.EQUALS);
-                match(Scanner.TOKEN.ID);
-                match(Scanner.TOKEN.THEN);
-                stmts();
-                match(Scanner.TOKEN.ENDIF);
-                break;
-            case WHILE:
-                match(Scanner.TOKEN.WHILE);
-                match(Scanner.TOKEN.ID);
-                match(Scanner.TOKEN.NOTEQUALS);
-                match(Scanner.TOKEN.ID);
-                match(Scanner.TOKEN.DO);
-                stmts();
-                match(Scanner.TOKEN.ENDWHILE);
-                break;
+                return ast.new NodeInit(ast.new NodeId(initVar), ast.new NodeIntLiteral(value));
             case CALCULATE:
                 match(Scanner.TOKEN.CALCULATE);
+                String calcVar = scanner.getTokenBufferString();
                 match(Scanner.TOKEN.ID);
                 match(Scanner.TOKEN.EQUALS);
-                add();
-                break;
+                AbsSynTree.NodeExpr expr = add();
+                return ast.new NodeCalculate(ast.new NodeId(calcVar), expr);
+            case IF:
+                match(Scanner.TOKEN.IF);
+                AbsSynTree.NodeId leftIf = ast.new NodeId(scanner.getTokenBufferString());
+                match(Scanner.TOKEN.ID);
+                match(Scanner.TOKEN.EQUALS);
+                AbsSynTree.NodeId rightIf = ast.new NodeId(scanner.getTokenBufferString());
+                match(Scanner.TOKEN.ID);
+                match(Scanner.TOKEN.THEN);
+                AbsSynTree.NodeStmts ifBody = stmts();
+                match(Scanner.TOKEN.ENDIF);
+                return ast.new NodeIf(leftIf, rightIf, ifBody);
+            case WHILE:
+                match(Scanner.TOKEN.WHILE);
+                AbsSynTree.NodeId leftWhile = ast.new NodeId(scanner.getTokenBufferString());
+                match(Scanner.TOKEN.ID);
+                match(Scanner.TOKEN.NOTEQUALS);
+                AbsSynTree.NodeId rightWhile = ast.new NodeId(scanner.getTokenBufferString());
+                match(Scanner.TOKEN.ID);
+                match(Scanner.TOKEN.DO);
+                AbsSynTree.NodeStmts whileBody = stmts();
+                match(Scanner.TOKEN.ENDWHILE);
+                return ast.new NodeWhile(leftWhile, rightWhile, whileBody);
             default:
-                throw new Exception("Parse Error: Unexpected token " + nextToken +
-                        " Buffer: " + scanner.getTokenBufferString());
+                throw new Exception("Unexpected token: " + nextToken);
         }
     }
 
     /**
-     * <Add> ::= <Value> <AddEnd>
+     * @return node representing addition operation
      *
      * @throws Exception if parsing fails
      */
-    private void add() throws Exception {
-        value();
-        addEnd();
+    private AbsSynTree.NodeExpr add() throws Exception {
+        AbsSynTree.NodeExpr left = value();
+        while (nextToken == Scanner.TOKEN.PLUS) {
+            match(Scanner.TOKEN.PLUS);
+            AbsSynTree.NodeExpr right = value();
+            left = ast.new NodePlus(left, right);
+        }
+        return left;
     }
 
     /**
@@ -227,18 +251,21 @@ public class Parser {
     }
 
     /**
-     * <Value> ::= id | intliteral
+     * @return node representing parsed value
      *
      * @throws Exception if next token isn't identifier or int literal
      */
-    private void value() throws Exception {
+    private AbsSynTree.NodeExpr value() throws Exception {
         if (nextToken == Scanner.TOKEN.ID) {
+            String name = scanner.getTokenBufferString();
             match(Scanner.TOKEN.ID);
+            return ast.new NodeId(name);
         } else if (nextToken == Scanner.TOKEN.INTLITERAL) {
+            int val = Integer.parseInt(scanner.getTokenBufferString());
             match(Scanner.TOKEN.INTLITERAL);
+            return ast.new NodeIntLiteral(val);
         } else {
-            throw new Exception("Parse Error: Expected ID or INTLITERAL\nReceived: " +
-                    nextToken + "\nBuffer: " + scanner.getTokenBufferString());
+            throw new Exception("Expected ID or INTLITERAL, got: " + nextToken);
         }
     }
 }
